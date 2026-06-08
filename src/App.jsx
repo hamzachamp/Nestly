@@ -721,7 +721,7 @@ function Onboarding({ onComplete, onDemo, displayFont, baseFont }) {
               Try with the demo family
             </button>
             <div style={{ marginTop: 28, padding: '18px 0', borderTop: '1px solid #E2E8F0', fontSize: 13, color: '#64748B', lineHeight: 1.5 }}>
-              Data stays on your device. Designed for two-income families with kids under ten. <span style={{ color: '#E11D48', fontWeight: 600 }}>$49/month at launch.</span>
+              Data stays on your device. Designed for two-income families with kids under ten. <span style={{ color: '#E11D48', fontWeight: 600 }}>$19/month at launch.</span>
             </div>
           </>
         )}
