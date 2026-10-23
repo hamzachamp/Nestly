@@ -577,24 +577,11 @@ export default function App() {
 
           // Step 3: If an invite token is present and user is not already in a family, try to accept it
           if (inviteToken && !fid) {
-            const { data: invite } = await supabase
-              .from('family_invites')
-              .select('id, family_id, expires_at, accepted')
-              .eq('token', inviteToken)
-              .maybeSingle();
-            if (invite && !invite.accepted && new Date(invite.expires_at) > new Date()) {
-              // Join the family
-              const { error: joinErr } = await supabase.from('family_members').insert({
-                family_id: invite.family_id,
-                user_id: session.user.id,
-                email: session.user.email,
-                role: 'member'
-              });
-              if (!joinErr) {
-                await supabase.from('family_invites').update({ accepted: true, accepted_by: session.user.id }).eq('id', invite.id);
-                fid = invite.family_id;
-                role = 'member';
-              }
+            // Validated server-side so invite tokens never have to be readable by other families
+            const { data: joinedFamilyId } = await supabase.rpc('accept_family_invite', { p_token: inviteToken });
+            if (joinedFamilyId) {
+              fid = joinedFamilyId;
+              role = 'member';
             }
             // Clean the URL
             window.history.replaceState(null, '', window.location.pathname);
@@ -947,6 +934,7 @@ function AuthScreen({ displayFont, baseFont }) {
   const [loading, setLoading] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
   const [consented, setConsented] = useState(false);
+  const [messagingConsent, setMessagingConsent] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
 
   const handleSubmit = async () => {
@@ -966,7 +954,8 @@ function AuthScreen({ displayFont, baseFont }) {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { consented_at: new Date().toISOString() } }
+          // messaging_consent is recorded in consent_messaging by a database trigger at signup
+          options: { data: { consented_at: new Date().toISOString(), messaging_consent: messagingConsent, messaging_channel: 'email' } }
         });
         if (error) throw error;
         if (!data.session) {
@@ -1023,6 +1012,15 @@ function AuthScreen({ displayFont, baseFont }) {
             <input type="checkbox" checked={consented} onChange={e => setConsented(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16, cursor: 'pointer', accentColor: '#E11D48', flexShrink: 0 }} />
             <span style={{ fontSize: 12, color: '#334155', lineHeight: 1.5 }}>
               I agree to Nestly's <button type="button" onClick={() => setShowPrivacy(true)} style={{ background: 'transparent', border: 'none', color: '#E11D48', fontWeight: 600, fontSize: 12, padding: 0, cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit' }}>privacy terms</button>. I understand that my family data is sent to Anthropic to power AI features, and emails I connect are processed but not stored on Nestly's servers.
+            </span>
+          </label>
+        )}
+
+        {mode === 'signup' && (
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', background: '#FAFAFA', border: '1px solid #E2E8F0', borderRadius: 10, marginTop: 8, marginBottom: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={messagingConsent} onChange={e => setMessagingConsent(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16, cursor: 'pointer', accentColor: '#E11D48', flexShrink: 0 }} />
+            <span style={{ fontSize: 12, color: '#334155', lineHeight: 1.5 }}>
+              Send me reminders and updates from Nestly by email. Optional — you can stop these anytime.
             </span>
           </label>
         )}
@@ -3725,31 +3723,21 @@ Family context:
 - This week's meal plan: ${data.mealPlan ? data.mealPlan.days.map(d => `${d.day}: ${d.name}`).join('; ') : 'none'}`;
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: CLAUDE_MODEL,
-          max_tokens: 1000,
-          system,
-          messages: newMessages.map(m => ({ role: m.role, content: m.content }))
-        })
-      });
-      if (!response.ok) {
-        const txt = await response.text().catch(() => '');
-        throw new Error('API ' + response.status + ': ' + txt.slice(0, 200));
-      }
-      const result = await response.json();
+      // Routed through anthropicRequest so chat counts toward the family's daily limit
+      const result = await anthropicRequest({
+        model: CLAUDE_MODEL,
+        system,
+        messages: newMessages.map(m => ({ role: m.role, content: m.content }))
+      }, 1000);
       const reply = result.content.map(c => c.text || '').join('').trim();
       const updated = [...newMessages, { role: 'assistant', content: reply }];
       setMessages(updated);
     } catch (e) {
-      setMessages([...newMessages, { role: 'assistant', content: "Couldn't reach me: " + (e.message || 'unknown error') + '. Check VITE_ANTHROPIC_API_KEY and the model name.' }]);
+      if (e instanceof LimitReachedError) {
+        setMessages([...newMessages, { role: 'assistant', content: e.message }]);
+      } else {
+        setMessages([...newMessages, { role: 'assistant', content: "Couldn't reach me: " + (e.message || 'unknown error') + '. Check VITE_ANTHROPIC_API_KEY and the model name.' }]);
+      }
     }
     setLoading(false);
   };
