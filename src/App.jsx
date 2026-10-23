@@ -12,6 +12,10 @@ const STORAGE_KEY = 'family-coo-v1';
 const DEMO_DATA = {
   initialized: true,
   familyName: "The Wilson Family",
+  adults: [
+    { id: 'a1', name: 'Alex', colour: 'slate' },
+    { id: 'a2', name: 'Sam', colour: 'plum' }
+  ],
   kids: [
     { id: 'k1', name: 'Emma', age: 8, school: 'Riverside Public', allergies: 'Tree nuts', picky: 'No tomatoes; loves pasta and rice', interests: 'Reading, art, badminton, swimming', colour: 'coral' },
     { id: 'k2', name: 'Jack', age: 5, school: 'Riverside Public', allergies: 'None', picky: "Won't eat anything visibly green; loves chicken", interests: 'Dance, music, LEGO, drawing', colour: 'sage' }
@@ -21,7 +25,8 @@ const DEMO_DATA = {
     { id: 't2', title: "Pack Jack's dance kit for Saturday", dueLabel: 'Fri', kidName: 'Jack', priority: 'medium', completed: false, source: 'Manual' },
     { id: 't3', title: "Pay Jack's term fees", dueLabel: 'Wed', kidName: 'Jack', priority: 'high', completed: false, source: 'Riverside Public' },
     { id: 't4', title: "Book-week costume for Emma", dueLabel: 'Next Mon', kidName: 'Emma', priority: 'medium', completed: false, source: 'Riverside Public' },
-    { id: 't5', title: "Reschedule Emma's dental check-up", dueLabel: 'This week', kidName: 'Emma', priority: 'low', completed: false, source: 'Manual' }
+    { id: 't5', title: "Reschedule Emma's dental check-up", dueLabel: 'This week', kidName: 'Emma', priority: 'low', completed: false, source: 'Manual' },
+    { id: 't6', title: 'Renew car registration', dueLabel: 'This week', kidName: 'Sam', priority: 'medium', completed: false, source: 'Manual' }
   ],
   mealPlan: null,
   inbox: [],
@@ -31,7 +36,8 @@ const DEMO_DATA = {
     { id: 'e2', title: 'Parent-teacher interview', startDate: '2026-06-19', startTime: '17:30', endTime: '18:00', kidName: 'Emma', kind: 'appointment', notes: 'Mr Singh, Year 2 classroom' },
     { id: 'e3', title: "Ollie's 7th birthday party", startDate: '2026-06-21', startTime: '11:00', endTime: '13:00', kidName: 'Emma', kind: 'event', notes: 'Sky Zone Castle Hill — pizza lunch' },
     { id: 'e4', title: "Emma's 9th birthday", startDate: '2026-08-22', kidName: 'Emma', kind: 'birthday', notes: 'Plan party 2 weeks ahead' },
-    { id: 'e5', title: "Jack's 6th birthday", startDate: '2026-11-12', kidName: 'Jack', kind: 'birthday' }
+    { id: 'e5', title: "Jack's 6th birthday", startDate: '2026-11-12', kidName: 'Jack', kind: 'birthday' },
+    { id: 'e6', title: 'Dentist check-up', startDate: '2026-06-17', startTime: '08:30', endTime: '09:15', kidName: 'Alex', kind: 'appointment', notes: 'Hornsby clinic' }
   ],
   // Pre-populated with REAL Sydney holiday programs for July 2026 winter break (6-17 July).
   // Demonstrates the search result experience instantly when demo data loads.
@@ -388,6 +394,15 @@ const KID_COLOURS = [
   { id: 'rust', name: 'Rust', hex: '#FB923C', tint: '#FFE4E6' }
 ];
 
+// Everyone in the household: adults first, then children. `kidName` on tasks/events is a legacy
+// field name — it holds any household member's name (adult or child).
+function getPeople(data) {
+  return [
+    ...((data && data.adults) || []).map(a => ({ ...a, role: 'adult' })),
+    ...((data && data.kids) || []).map(k => ({ ...k, role: 'child' }))
+  ];
+}
+
 function getKidColour(kidName, kids) {
   if (!kidName || !kids) return null;
   const kid = kids.find(k => k.name === kidName);
@@ -692,8 +707,8 @@ export default function App() {
         table: 'family_data',
         filter: 'family_id=eq.' + familyId
       }, (payload) => {
-        // Skip our own writes (we already have that state)
-        if (payload.new.updated_by === session.user.id) return;
+        // Echoes of our own writes are filtered by the timestamp guard below. We deliberately do NOT skip
+        // on updated_by: the messaging assistant writes on behalf of a user and must sync back to their app.
         // Guard against stale writes from other devices: only accept if the incoming
         // timestamp is NEWER than what we last wrote or received.
         const incomingTs = new Date(payload.new.updated_at).getTime();
@@ -1155,12 +1170,14 @@ function RecoveryScreen({ displayFont, baseFont, onComplete }) {
 function Onboarding({ onComplete, onDemo, displayFont, baseFont }) {
   const [step, setStep] = useState(0);
   const [familyName, setFamilyName] = useState('');
+  const [adults, setAdults] = useState([{ id: 'a' + Date.now(), name: '', colour: KID_COLOURS[2].id }]);
   const [kids, setKids] = useState([{ id: 'k' + Date.now(), name: '', age: '', school: '', allergies: '', picky: '', interests: '', colour: KID_COLOURS[0].id }]);
 
   const finish = () => {
     onComplete({
       initialized: true,
       familyName: familyName || 'My Family',
+      adults: adults.filter(a => a.name.trim()).map((a, i) => ({ ...a, name: a.name.trim(), colour: a.colour || KID_COLOURS[(i + 2) % KID_COLOURS.length].id })),
       kids: kids.filter(k => k.name.trim()).map((k, i) => ({ ...k, age: parseInt(k.age) || 0, colour: k.colour || KID_COLOURS[i % KID_COLOURS.length].id })),
       tasks: [],
       mealPlan: null,
@@ -1213,7 +1230,31 @@ function Onboarding({ onComplete, onDemo, displayFont, baseFont }) {
 
         {step === 2 && (
           <div>
-            <label style={labelStyle}>Tell me about your kids</label>
+            <label style={labelStyle}>Who&apos;s in your household?</label>
+            <p style={{ fontSize: 13, color: '#64748B', margin: '0 0 16px' }}>Add yourself and any other adults. Everyone gets their own reminders and a personal morning brief.</p>
+            {adults.map((a, i) => (
+              <div key={a.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <input placeholder={i === 0 ? 'Your name' : 'Partner / other adult'} value={a.name} onChange={e => setAdults(adults.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} autoFocus={i === 0} />
+                {adults.length > 1 && (
+                  <button onClick={() => setAdults(adults.filter((_, ix) => ix !== i))} aria-label="Remove" style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer' }}><Trash2 size={14} /></button>
+                )}
+              </div>
+            ))}
+            <button onClick={() => setAdults([...adults, { id: 'a' + Date.now(), name: '', colour: KID_COLOURS[(adults.length + 2) % KID_COLOURS.length].id }])} style={{ background: 'transparent', border: '1px dashed #CBD5E1', borderRadius: 12, padding: '10px 14px', cursor: 'pointer', color: '#475569', display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'inherit', fontSize: 13, width: '100%', justifyContent: 'center' }}>
+              <Plus size={14} /> Add another adult
+            </button>
+            <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
+              <button onClick={() => setStep(1)} style={btnGhost}>Back</button>
+              <button onClick={() => setStep(3)} disabled={!adults.some(a => a.name.trim())} style={{ ...btnPrimary, opacity: adults.some(a => a.name.trim()) ? 1 : 0.4 }}>
+                Continue <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div>
+            <label style={labelStyle}>Tell me about your kids <span style={{ color: '#94A3B8', textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· optional</span></label>
             <p style={{ fontSize: 13, color: '#64748B', margin: '0 0 16px' }}>The more I know, the smarter I can be. Edit anytime.</p>
             {kids.map((k, i) => (
               <div key={k.id} style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 14, padding: 14, marginBottom: 12 }}>
@@ -1237,8 +1278,8 @@ function Onboarding({ onComplete, onDemo, displayFont, baseFont }) {
               <Plus size={14} /> Add another child
             </button>
             <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
-              <button onClick={() => setStep(1)} style={btnGhost}>Back</button>
-              <button onClick={finish} disabled={!kids.some(k => k.name.trim())} style={{ ...btnPrimary, opacity: kids.some(k => k.name.trim()) ? 1 : 0.4 }}>
+              <button onClick={() => setStep(2)} style={btnGhost}>Back</button>
+              <button onClick={finish} style={btnPrimary}>
                 Enter the COO <ChevronRight size={16} />
               </button>
             </div>
@@ -1366,7 +1407,7 @@ function TodayView({ data, setData, displayFont, setView }) {
           </div>
         )}
         {open.map(t => (
-          <TaskRow key={t.id} task={t} kidColour={getKidColour(t.kidName, data.kids)} onToggle={() => toggleTask(t.id)} onAddToCalendar={() => openAddToCal(t)} />
+          <TaskRow key={t.id} task={t} kidColour={getKidColour(t.kidName, getPeople(data))} onToggle={() => toggleTask(t.id)} onAddToCalendar={() => openAddToCal(t)} />
         ))}
       </div>
 
@@ -1391,7 +1432,7 @@ function TodayView({ data, setData, displayFont, setView }) {
           {showCompleted && (
             <div>
               {completed.map(t => (
-                <TaskRow key={t.id} task={t} kidColour={getKidColour(t.kidName, data.kids)} onToggle={() => toggleTask(t.id)} onDelete={() => deleteTask(t.id)} />
+                <TaskRow key={t.id} task={t} kidColour={getKidColour(t.kidName, getPeople(data))} onToggle={() => toggleTask(t.id)} onDelete={() => deleteTask(t.id)} />
               ))}
               <button onClick={clearCompleted} style={{ background: 'transparent', border: '1px dashed #CBD5E1', color: '#64748B', borderRadius: 8, padding: '7px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', marginTop: 6 }}>
                 Clear all completed
@@ -1427,18 +1468,18 @@ function TodayView({ data, setData, displayFont, setView }) {
       )}
 
       {/* Kids overview */}
-      {data.kids.length > 0 && (
+      {getPeople(data).length > 0 && (
         <div style={{ marginTop: 32 }}>
           <h3 style={{ fontFamily: displayFont, fontSize: 20, fontWeight: 500, margin: '0 0 12px', letterSpacing: '-0.02em' }}>The crew</h3>
           <div style={{ display: 'grid', gap: 8 }}>
-            {data.kids.map(k => {
+            {getPeople(data).map(k => {
               const count = open.filter(t => t.kidName === k.name).length;
-              const c = getKidColour(k.name, data.kids);
+              const c = getKidColour(k.name, getPeople(data));
               return (
                 <div key={k.id} style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderLeft: '3px solid ' + (c?.hex || '#CBD5E1'), borderRadius: 14, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
                     <div style={{ fontFamily: displayFont, fontSize: 17, fontWeight: 500, letterSpacing: '-0.01em' }}>{k.name}</div>
-                    <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{k.age ? `Age ${k.age} · ` : ''}{k.school || 'No school set'}</div>
+                    <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>{k.role === 'adult' ? 'Adult' : `${k.age ? `Age ${k.age} · ` : ''}${k.school || 'No school set'}`}</div>
                   </div>
                   {count > 0 && <span style={{ background: c?.tint || '#FEF3C7', color: c?.hex || '#E11D48', fontSize: 11, fontWeight: 600, padding: '4px 9px', borderRadius: 100, letterSpacing: '0.02em' }}>{count} open</span>}
                 </div>
@@ -2129,7 +2170,7 @@ function CalendarView({ data, setData, setView, displayFont, familyId }) {
   // Aggregate events from all sources, attaching the kid's colour
   const aggregateEvents = () => {
     const list = [];
-    (data.events || []).forEach(e => list.push({ ...e, source: e.source || 'manual', kidColour: getKidColour(e.kidName, data.kids) }));
+    (data.events || []).forEach(e => list.push({ ...e, source: e.source || 'manual', kidColour: getKidColour(e.kidName, getPeople(data)) }));
 
     // Completed tasks appear on the calendar on the day they were completed
     (data.tasks || []).filter(t => t.completed && t.completedAt).forEach(t => {
@@ -2142,7 +2183,7 @@ function CalendarView({ data, setData, setView, displayFont, familyId }) {
           title: t.title,
           startDate: iso,
           kidName: t.kidName || null,
-          kidColour: getKidColour(t.kidName, data.kids),
+          kidColour: getKidColour(t.kidName, getPeople(data)),
           kind: 'completed-task',
           completed: true,
           source: 'Completed',
@@ -2155,7 +2196,7 @@ function CalendarView({ data, setData, setView, displayFont, familyId }) {
     if (plan?.saved?.length && plan.programs && plan.startDate && plan.endDate) {
       const planKid = data.kids.find(k => k.id === plan.forKidId);
       const kidName = planKid?.name;
-      const kidColour = getKidColour(kidName, data.kids);
+      const kidColour = getKidColour(kidName, getPeople(data));
       plan.programs.filter(p => plan.saved.includes(p.id)).forEach(p => {
         list.push({
           id: 'hp-' + p.id,
@@ -2321,7 +2362,7 @@ function CalendarView({ data, setData, setView, displayFont, familyId }) {
         Saved holiday programs, NSW school holidays, and birthdays appear automatically. In production: two-way Google &amp; Apple Calendar sync replaces snapshot export.
       </p>
 
-      {showAdd && <AddEventModal kids={data.kids} initial={editing} onSave={saveEvent} onDelete={editing && editing.source === 'manual' ? () => deleteEvent(editing.id) : null} onClose={() => { setShowAdd(false); setEditing(null); }} displayFont={displayFont} />}
+      {showAdd && <AddEventModal kids={getPeople(data)} initial={editing} onSave={saveEvent} onDelete={editing && editing.source === 'manual' ? () => deleteEvent(editing.id) : null} onClose={() => { setShowAdd(false); setEditing(null); }} displayFont={displayFont} />}
 
       {showSubscribe && feedUrl && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowSubscribe(false)}>
@@ -2674,10 +2715,10 @@ function AddEventModal({ kids, initial, onSave, onDelete, onClose, displayFont }
           </div>
         </div>
 
-        <label style={{ ...labelStyle, marginTop: 4 }}>For which child <span style={{ color: '#94A3B8', textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· optional</span></label>
+        <label style={{ ...labelStyle, marginTop: 4 }}>Who is this for? <span style={{ color: '#94A3B8', textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· optional</span></label>
         <select value={kidName} onChange={e => setKidName(e.target.value)} style={{ ...inputStyle, appearance: 'none', backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B7E70' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', paddingRight: 32 }}>
           <option value="">— None / whole family —</option>
-          {(kids || []).map(k => <option key={k.id} value={k.name}>{k.name}</option>)}
+          {(kids || []).map(k => <option key={k.id} value={k.name}>{k.name}{k.role === 'adult' ? ' (adult)' : ''}</option>)}
         </select>
 
         <label style={labelStyle}>Notes <span style={{ color: '#94A3B8', textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· optional</span></label>
@@ -3715,7 +3756,7 @@ function AssistantView({ data, setData, displayFont, session }) {
     setInput('');
     setLoading(true);
 
-    const kidsContext = data.kids.map(k => `${k.name} (${k.age}y, ${k.school || 'no school'}, allergies: ${k.allergies || 'none'}, picky: ${k.picky || 'none'}, interests: ${k.interests || 'none'})`).join('; ');
+    const kidsContext = data.kids.map(k => `${k.name} (${k.age}y, ${k.school || 'no school'}, allergies: ${k.allergies || 'none'}, picky: ${k.picky || 'none'}, interests: ${k.interests || 'none'})`).join('; ') + ((data.adults || []).length ? '. Adults in the household: ' + data.adults.map(a => a.name).join(', ') : '');
     const tasksContext = (data.tasks || []).filter(t => !t.completed).map(t => `${t.title} [${t.priority}, ${t.dueLabel}]`).join('; ') || 'none';
     const system = `You are the AI Chief of Staff for ${data.familyName}. You speak with the warmth of a trusted friend who's seen it all and the precision of an excellent operator. You are concise, dry, and never sycophantic. You never use emojis or exclamation marks. Address the parent directly. Two-to-four sentences typically; longer only when listing concrete options.
 
@@ -4090,6 +4131,18 @@ function SettingsPanel({ data, setData, onClose, displayFont, session, familyId,
           <input value={data.familyName} onChange={e => setData({ ...data, familyName: e.target.value })} style={inputStyle} />
         </div>
 
+        <h4 style={{ fontFamily: displayFont, fontSize: 18, fontWeight: 500, letterSpacing: '-0.01em', margin: '24px 0 12px' }}>The adults</h4>
+        {(data.adults || []).map((a, i) => (
+          <AdultEditor key={a.id} adult={a} onChange={(updated) => {
+            const next = [...(data.adults || [])];
+            next[i] = updated;
+            setData({ ...data, adults: next });
+          }} onRemove={() => setData({ ...data, adults: (data.adults || []).filter((_, ix) => ix !== i) })} />
+        ))}
+        <button onClick={() => setData({ ...data, adults: [...(data.adults || []), { id: 'a' + Date.now(), name: 'New adult', colour: KID_COLOURS[((data.adults || []).length + 2) % KID_COLOURS.length].id }] })} style={{ ...btnGhost, width: '100%', justifyContent: 'center' }}>
+          <Plus size={14} /> Add adult
+        </button>
+
         <h4 style={{ fontFamily: displayFont, fontSize: 18, fontWeight: 500, letterSpacing: '-0.01em', margin: '24px 0 12px' }}>The kids</h4>
         {data.kids.map((k, i) => (
           <KidEditor key={k.id} kid={k} onChange={(updated) => {
@@ -4103,6 +4156,10 @@ function SettingsPanel({ data, setData, onClose, displayFont, session, familyId,
         <button onClick={() => setData({ ...data, kids: [...data.kids, { id: 'k' + Date.now(), name: 'New child', age: 0, school: '', allergies: '', picky: '', interests: '', colour: KID_COLOURS[data.kids.length % KID_COLOURS.length].id }] })} style={{ ...btnGhost, width: '100%', justifyContent: 'center' }}>
           <Plus size={14} /> Add child
         </button>
+
+        {supabase && session && familyId && (
+          <AssistantConnectPanel data={data} session={session} familyId={familyId} displayFont={displayFont} />
+        )}
 
         {supabase && session && (
           <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid #E2E8F0' }}>
@@ -4251,6 +4308,208 @@ function KidEditor({ kid, onChange, onRemove }) {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function AdultEditor({ adult, onChange, onRemove }) {
+  const [expanded, setExpanded] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const currentColour = KID_COLOURS.find(c => c.id === adult.colour) || KID_COLOURS[2];
+  return (
+    <div style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderLeft: '3px solid ' + currentColour.hex, borderRadius: 14, padding: 14, marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: expanded ? 12 : 0 }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>{adult.name || '(unnamed)'}</div>
+          <div style={{ fontSize: 12, color: '#64748B' }}>Adult</div>
+        </div>
+        <button onClick={() => { setExpanded(!expanded); setConfirmingRemove(false); }} style={{ background: 'transparent', border: 'none', color: '#E11D48', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{expanded ? 'Done' : 'Edit'}</button>
+      </div>
+      {expanded && (
+        <>
+          <input placeholder="Name" value={adult.name} onChange={e => onChange({ ...adult, name: e.target.value })} style={inputStyle} />
+          <label style={{ ...labelStyle, marginTop: 4 }}>Colour</label>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+            {KID_COLOURS.map(c => (
+              <button key={c.id} onClick={() => onChange({ ...adult, colour: c.id })} title={c.name} style={{
+                width: 32, height: 32, borderRadius: '50%', background: c.hex,
+                border: adult.colour === c.id ? '3px solid #0F172A' : '2px solid transparent',
+                cursor: 'pointer', padding: 0, outlineOffset: 2
+              }} />
+            ))}
+          </div>
+          {!confirmingRemove ? (
+            <button onClick={() => setConfirmingRemove(true)} style={{ background: 'transparent', border: 'none', color: '#E11D48', fontSize: 12, fontWeight: 600, cursor: 'pointer', marginTop: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Trash2 size={12} /> Remove this adult
+            </button>
+          ) : (
+            <div style={{ marginTop: 12, padding: 10, background: '#FFE4E6', border: '1px solid #FECDD3', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12.5, color: '#E11D48' }}>Remove {adult.name || 'this adult'}?</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setConfirmingRemove(false)} style={{ background: 'transparent', border: '1px solid #CBD5E1', color: '#0F172A', borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+                <button onClick={onRemove} style={{ background: '#E11D48', color: '#FFFFFF', border: 'none', borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Remove</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// ASSISTANT — connect a messaging account (Telegram) so Nestly can remind you and take instructions
+// Feature-flagged: nothing renders as "active" unless VITE_TELEGRAM_BOT_USERNAME is set.
+// =====================================================================
+const LINK_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no look-alike characters
+
+function makeLinkCode() {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => LINK_CODE_ALPHABET[b % LINK_CODE_ALPHABET.length]).join('');
+}
+
+function AssistantConnectPanel({ data, session, familyId, displayFont }) {
+  const botName = import.meta.env.VITE_TELEGRAM_BOT_USERNAME;
+  const [links, setLinks] = useState(null); // null = still loading
+  const [person, setPerson] = useState('');
+  const [code, setCode] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const adultNames = (data.adults || []).map(a => a.name).filter(Boolean);
+  const userId = session?.user?.id;
+
+  const load = async () => {
+    if (!supabase || !userId) return;
+    const { data: rows } = await supabase.from('channel_links').select('*').eq('user_id', userId).eq('channel', 'telegram');
+    setLinks(rows || []);
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [userId]);
+
+  // While a code is pending, poll for the link to appear; the code itself expires after 15 minutes.
+  useEffect(() => {
+    if (!code) return;
+    const poll = setInterval(load, 4000);
+    const expire = setTimeout(() => setCode(null), 15 * 60 * 1000);
+    return () => { clearInterval(poll); clearTimeout(expire); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (links && links.length > 0 && code) setCode(null); }, [links]);
+
+  const link = links && links[0];
+
+  const connect = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const c = makeLinkCode();
+      const { error: insErr } = await supabase.from('link_codes').insert({
+        code: c, family_id: familyId, user_id: userId, person_name: person || null
+      });
+      if (insErr) throw insErr;
+      setCode(c);
+    } catch (e) {
+      setError('Could not start the connection: ' + (e.message || 'unknown error'));
+    }
+    setBusy(false);
+  };
+
+  const updateLink = async (patch) => {
+    if (!link) return;
+    setLinks([{ ...link, ...patch }]);
+    const { error: upErr } = await supabase.from('channel_links').update(patch).eq('id', link.id);
+    if (upErr) { setError('Could not save: ' + upErr.message); load(); }
+  };
+
+  const disconnect = async () => {
+    if (!link || !window.confirm('Disconnect Telegram? You will stop receiving reminders and can reconnect any time.')) return;
+    await supabase.from('channel_links').delete().eq('id', link.id);
+    setLinks([]);
+  };
+
+  const card = { background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 16, padding: 16 };
+  const small = { fontSize: 12.5, color: '#64748B', lineHeight: 1.5, margin: '0 0 12px' };
+
+  return (
+    <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid #E2E8F0' }}>
+      <h4 style={{ fontFamily: displayFont, fontSize: 18, fontWeight: 500, letterSpacing: '-0.01em', margin: '0 0 4px' }}>Personal assistant</h4>
+      <p style={small}>Message Nestly on Telegram to add events, tasks and reminders. They appear here instantly, and Nestly messages you reminders and a morning brief.</p>
+
+      {!botName && (
+        <div style={card}><p style={{ ...small, margin: 0 }}>Coming soon.</p></div>
+      )}
+
+      {botName && links === null && <div style={card}><p style={{ ...small, margin: 0 }}>Loading…</p></div>}
+
+      {botName && links !== null && !link && (
+        <div style={card}>
+          {adultNames.length > 0 && (
+            <>
+              <label style={labelStyle}>Who are you?</label>
+              <select value={person} onChange={e => setPerson(e.target.value)} style={inputStyle}>
+                <option value="">Choose your name…</option>
+                {adultNames.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </>
+          )}
+          {!code ? (
+            <button onClick={connect} disabled={busy || (adultNames.length > 0 && !person)} style={{ ...btnPrimary, width: '100%', justifyContent: 'center', opacity: (busy || (adultNames.length > 0 && !person)) ? 0.5 : 1 }}>
+              Connect Telegram
+            </button>
+          ) : (
+            <div>
+              <a href={'https://t.me/' + botName + '?start=' + code} target="_blank" rel="noreferrer" style={{ ...btnPrimary, textDecoration: 'none', width: '100%', justifyContent: 'center', boxSizing: 'border-box' }}>
+                Open Telegram and tap Start
+              </a>
+              <p style={{ ...small, marginTop: 10, marginBottom: 0 }}>Waiting for you to tap Start in Telegram… If the button doesn’t open Telegram, message <strong>@{botName}</strong> and send <strong>/start {code}</strong>. This code works once and expires in 15 minutes.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {botName && link && (
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: '#0F172A' }}>Telegram connected</div>
+              <div style={{ fontSize: 12, color: link.active ? '#059669' : '#B45309' }}>{link.active ? 'Active' : 'Paused — send /start to the bot to resume'}</div>
+            </div>
+            <button onClick={disconnect} style={{ background: 'transparent', border: 'none', color: '#E11D48', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Disconnect</button>
+          </div>
+          {adultNames.length > 0 && (
+            <>
+              <label style={labelStyle}>This account belongs to</label>
+              <select value={link.person_name || ''} onChange={e => updateLink({ person_name: e.target.value || null })} style={inputStyle}>
+                <option value="">Whole household</option>
+                {adultNames.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </>
+          )}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', cursor: 'pointer', fontSize: 13.5 }}>
+            <input type="checkbox" checked={!!link.reminders_enabled} onChange={e => updateLink({ reminders_enabled: e.target.checked })} style={{ width: 18, height: 18, accentColor: '#E11D48' }} />
+            Event and reminder alerts
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', cursor: 'pointer', fontSize: 13.5 }}>
+            <input type="checkbox" checked={!!link.brief_enabled} onChange={e => updateLink({ brief_enabled: e.target.checked })} style={{ width: 18, height: 18, accentColor: '#E11D48' }} />
+            Morning brief
+          </label>
+          {link.brief_enabled && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 8px 28px', fontSize: 13 }}>
+              <span style={{ color: '#64748B' }}>Send at</span>
+              <select value={link.brief_hour} onChange={e => updateLink({ brief_hour: parseInt(e.target.value, 10) })} style={{ ...inputStyle, width: 'auto', marginBottom: 0 }}>
+                {[5, 6, 7, 8, 9, 10].map(h => <option key={h} value={h}>{h}:00 am</option>)}
+              </select>
+            </div>
+          )}
+          <p style={{ ...small, margin: '8px 0 0', fontSize: 12 }}>Try: “Dentist for Jack Tuesday 4pm”, “Remind me to call the school tomorrow at 3”, “What’s on this week?”</p>
+        </div>
+      )}
+
+      {error && <p style={{ fontSize: 12, color: '#E11D48', margin: '8px 0 0' }}>{error}</p>}
     </div>
   );
 }
