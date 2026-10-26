@@ -3766,31 +3766,16 @@ Family context:
 - This week's meal plan: ${data.mealPlan ? data.mealPlan.days.map(d => `${d.day}: ${d.name}`).join('; ') : 'none'}`;
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: CLAUDE_MODEL,
-          max_tokens: 1000,
-          system,
-          messages: newMessages.map(m => ({ role: m.role, content: m.content }))
-        })
-      });
-      if (!response.ok) {
-        const txt = await response.text().catch(() => '');
-        throw new Error('API ' + response.status + ': ' + txt.slice(0, 200));
-      }
-      const result = await response.json();
+      const result = await anthropicRequest({
+        model: CLAUDE_MODEL,
+        system,
+        messages: newMessages.map(m => ({ role: m.role, content: m.content }))
+      }, 1000);
       const reply = result.content.map(c => c.text || '').join('').trim();
       const updated = [...newMessages, { role: 'assistant', content: reply }];
       setMessages(updated);
     } catch (e) {
-      setMessages([...newMessages, { role: 'assistant', content: "Couldn't reach me: " + (e.message || 'unknown error') + '. Check VITE_ANTHROPIC_API_KEY and the model name.' }]);
+      setMessages([...newMessages, { role: 'assistant', content: "Couldn't reach me: " + (e.message || 'unknown error') + '. Please try again in a moment.' }]);
     }
     setLoading(false);
   };
