@@ -1313,10 +1313,13 @@ function TodayView({ data, setData, displayFont, setView }) {
   const [calDate, setCalDate] = useState('');
   const [calTime, setCalTime] = useState('');
   const [calLocation, setCalLocation] = useState('');
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [personFilter, setPersonFilter] = useState('all'); // 'all' | person name
   const tasks = data.tasks || [];
   const open = tasks.filter(t => !t.completed);
   const completed = tasks.filter(t => t.completed);
   const high = open.filter(t => t.priority === 'high');
+  const visibleOpen = personFilter === 'all' ? open : open.filter(t => t.kidName === personFilter);
   const today = new Date().toLocaleDateString('en-AU', { weekday: 'long', month: 'long', day: 'numeric' });
 
   const toggleTask = (id) => {
@@ -1330,6 +1333,11 @@ function TodayView({ data, setData, displayFont, setView }) {
 
   const deleteTask = (id) => {
     setData({ ...data, tasks: tasks.filter(t => t.id !== id) });
+  };
+
+  const addTask = (task) => {
+    setData({ ...data, tasks: [task, ...(data.tasks || [])] });
+    setShowAddTask(false);
   };
 
   const openAddToCal = (task) => {
@@ -1401,12 +1409,27 @@ function TodayView({ data, setData, displayFont, setView }) {
           <h3 style={{ fontFamily: displayFont, fontSize: 20, fontWeight: 500, margin: 0, letterSpacing: '-0.02em' }}>Open items</h3>
           <span style={{ fontSize: 12, color: '#64748B' }}>{open.length} of {tasks.length}</span>
         </div>
-        {open.length === 0 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+          <button onClick={() => setShowAddTask(true)} style={{ ...btnPrimary, padding: '8px 14px', fontSize: 13 }}>
+            <Plus size={14} /> Add task
+          </button>
+          {getPeople(data).length > 1 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[{ id: 'all', name: 'Everyone' }, ...getPeople(data)].map(p => {
+                const active = personFilter === (p.id === 'all' ? 'all' : p.name);
+                return (
+                  <button key={p.id} onClick={() => setPersonFilter(p.id === 'all' ? 'all' : p.name)} style={{ background: active ? '#0F172A' : '#FFFFFF', color: active ? '#FFFFFF' : '#334155', border: '1px solid ' + (active ? '#0F172A' : '#E2E8F0'), borderRadius: 100, padding: '5px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{p.name}</button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {visibleOpen.length === 0 && (
           <div style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 16, padding: 22, textAlign: 'center', color: '#64748B', fontSize: 14 }}>
-            All caught up. Process a school email or generate a meal plan from the tabs below.
+            {personFilter === 'all' ? 'All caught up. Add a task, process a school email or generate a meal plan.' : 'Nothing open for ' + personFilter + '.'}
           </div>
         )}
-        {open.map(t => (
+        {visibleOpen.map(t => (
           <TaskRow key={t.id} task={t} kidColour={getKidColour(t.kidName, getPeople(data))} onToggle={() => toggleTask(t.id)} onAddToCalendar={() => openAddToCal(t)} />
         ))}
       </div>
@@ -1441,6 +1464,8 @@ function TodayView({ data, setData, displayFont, setView }) {
           )}
         </div>
       )}
+
+      {showAddTask && <AddTaskModal people={getPeople(data)} onSave={addTask} onClose={() => setShowAddTask(false)} displayFont={displayFont} defaultFor={personFilter === 'all' ? '' : personFilter} />}
 
       {/* Add-to-calendar modal */}
       {addingToCal && (
@@ -1488,6 +1513,71 @@ function TodayView({ data, setData, displayFont, setView }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function AddTaskModal({ people, onSave, onClose, displayFont, defaultFor }) {
+  const [title, setTitle] = useState('');
+  const [forName, setForName] = useState(defaultFor || '');
+  const [dueDate, setDueDate] = useState('');
+  const [priority, setPriority] = useState('medium');
+
+  const dueLabelFor = (iso) => {
+    if (!iso) return 'No date';
+    const d = new Date(iso + 'T00:00:00');
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const diff = Math.round((d - t0) / 86400000);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Tomorrow';
+    return d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+  };
+
+  const save = () => {
+    if (!title.trim()) return;
+    onSave({
+      id: 'task-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5),
+      title: title.trim(),
+      dueLabel: dueLabelFor(dueDate),
+      dueDate: dueDate || null,
+      priority,
+      kidName: forName || null,
+      completed: false,
+      source: 'Added in app',
+      createdAt: new Date().toISOString()
+    });
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#FFFFFF', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 500, padding: '24px 22px 32px', maxHeight: '90vh', overflow: 'auto' }}>
+        <h3 style={{ fontFamily: displayFont, fontSize: 22, fontWeight: 500, letterSpacing: '-0.02em', margin: '0 0 16px' }}>Add a task</h3>
+
+        <label style={labelStyle}>What needs doing?</label>
+        <input value={title} onChange={e => setTitle(e.target.value)} onKeyDown={e => e.key === 'Enter' && save()} placeholder="e.g. Book the car service" style={inputStyle} autoFocus />
+
+        <label style={labelStyle}>For</label>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+          {[{ id: 'all', name: '' , label: 'Everyone' }, ...people.map(p => ({ id: p.id, name: p.name, label: p.name }))].map(p => (
+            <button key={p.id} onClick={() => setForName(p.name)} style={{ background: forName === p.name ? '#0F172A' : '#FFFFFF', color: forName === p.name ? '#FFFFFF' : '#334155', border: '1px solid ' + (forName === p.name ? '#0F172A' : '#E2E8F0'), borderRadius: 100, padding: '6px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{p.label}</button>
+          ))}
+        </div>
+
+        <label style={labelStyle}>Due date <span style={{ color: '#94A3B8', textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· optional</span></label>
+        <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} style={inputStyle} />
+
+        <label style={labelStyle}>Priority</label>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
+          {['high', 'medium', 'low'].map(pr => (
+            <button key={pr} onClick={() => setPriority(pr)} style={{ background: priority === pr ? '#0F172A' : '#FFFFFF', color: priority === pr ? '#FFFFFF' : '#334155', border: '1px solid ' + (priority === pr ? '#0F172A' : '#E2E8F0'), borderRadius: 100, padding: '6px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', textTransform: 'capitalize' }}>{pr}</button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #CBD5E1', color: '#0F172A', borderRadius: 100, padding: '10px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+          <button onClick={save} disabled={!title.trim()} style={{ ...btnPrimary, opacity: title.trim() ? 1 : 0.5, cursor: title.trim() ? 'pointer' : 'not-allowed' }}>Add task</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2774,30 +2864,32 @@ function ListsView({ data, setData, displayFont, session }) {
       </h2>
 
       <div style={{ display: 'inline-flex', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 10, padding: 3, marginBottom: 18, flexWrap: 'wrap', gap: 2 }}>
-        <button onClick={() => setSubview('shopping')} style={{ background: subview === 'shopping' ? '#8B3A2C' : 'transparent', color: subview === 'shopping' ? '#FFFFFF' : '#475569', border: 'none', borderRadius: 7, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Shopping</button>
+        <button onClick={() => setSubview('shopping')} style={{ background: subview === 'shopping' ? '#8B3A2C' : 'transparent', color: subview === 'shopping' ? '#FFFFFF' : '#475569', border: 'none', borderRadius: 7, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Lists</button>
         <button onClick={() => setSubview('dates')} style={{ background: subview === 'dates' ? '#8B3A2C' : 'transparent', color: subview === 'dates' ? '#FFFFFF' : '#475569', border: 'none', borderRadius: 7, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Key dates</button>
         <button onClick={() => setSubview('settings')} style={{ background: subview === 'settings' ? '#8B3A2C' : 'transparent', color: subview === 'settings' ? '#FFFFFF' : '#475569', border: 'none', borderRadius: 7, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Emails</button>
       </div>
 
-      {subview === 'shopping' && <ShoppingListsPanel lists={shoppingLists} onChange={updateShoppingLists} session={session} displayFont={displayFont} />}
+      {subview === 'shopping' && <ShoppingListsPanel lists={shoppingLists} onChange={updateShoppingLists} session={session} displayFont={displayFont} people={getPeople(data)} />}
       {subview === 'dates' && <ImportantDatesPanel dates={importantDates} onChange={updateImportantDates} displayFont={displayFont} />}
       {subview === 'settings' && <NotificationPrefsPanel prefs={notifPrefs} onChange={updateNotifPrefs} session={session} displayFont={displayFont} />}
     </div>
   );
 }
 
-function ShoppingListsPanel({ lists, onChange, session, displayFont }) {
+function ShoppingListsPanel({ lists, onChange, session, displayFont, people = [] }) {
   const [newListName, setNewListName] = useState('');
+  const [newListFor, setNewListFor] = useState('');
   const [activeListId, setActiveListId] = useState(lists[0]?.id || null);
   const [newItemText, setNewItemText] = useState('');
   const activeList = lists.find(l => l.id === activeListId);
 
   const createList = () => {
     if (!newListName.trim()) return;
-    const newList = { id: 'sl-' + Date.now(), name: newListName.trim(), items: [], createdAt: new Date().toISOString(), createdBy: session?.user?.id || null };
+    const newList = { id: 'sl-' + Date.now(), name: newListName.trim(), forName: newListFor || null, items: [], createdAt: new Date().toISOString(), createdBy: session?.user?.id || null };
     onChange([...lists, newList]);
     setActiveListId(newList.id);
     setNewListName('');
+    setNewListFor('');
   };
   const deleteList = (id) => {
     if (!window.confirm('Delete this whole list?')) return;
@@ -2831,15 +2923,15 @@ function ShoppingListsPanel({ lists, onChange, session, displayFont }) {
     <div>
       {lists.length === 0 ? (
         <div style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 16, padding: 24, textAlign: 'center', marginBottom: 12 }}>
-          <div style={{ fontFamily: displayFont, fontSize: 20, fontWeight: 500, letterSpacing: '-0.02em', marginBottom: 6 }}>No shopping lists yet.</div>
-          <p style={{ fontSize: 13, color: '#64748B', margin: 0, lineHeight: 1.5 }}>Create one below. Everyone in your family will see it and can tick items off in real time.</p>
+          <div style={{ fontFamily: displayFont, fontSize: 20, fontWeight: 500, letterSpacing: '-0.02em', marginBottom: 6 }}>No lists yet.</div>
+          <p style={{ fontSize: 13, color: '#64748B', margin: 0, lineHeight: 1.5 }}>Create one below, for everyone or for a specific person. The whole family can see it and tick items off in real time.</p>
         </div>
       ) : (
         <>
           <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
             {lists.map(l => (
               <button key={l.id} onClick={() => setActiveListId(l.id)} style={{ background: activeListId === l.id ? '#8B3A2C' : '#FFFFFF', color: activeListId === l.id ? '#FFFFFF' : '#334155', border: '1px solid ' + (activeListId === l.id ? '#8B3A2C' : '#E2E8F0'), borderRadius: 100, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                {l.name} <span style={{ opacity: 0.7, marginLeft: 4 }}>{l.items.filter(i => !i.checked).length}</span>
+                {l.name}{l.forName ? ' · ' + l.forName : ''} <span style={{ opacity: 0.7, marginLeft: 4 }}>{l.items.filter(i => !i.checked).length}</span>
               </button>
             ))}
           </div>
@@ -2847,7 +2939,7 @@ function ShoppingListsPanel({ lists, onChange, session, displayFont }) {
           {activeList && (
             <div style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 16, padding: '16px 18px', marginBottom: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <h3 style={{ fontFamily: displayFont, fontSize: 20, fontWeight: 500, letterSpacing: '-0.01em', margin: 0 }}>{activeList.name}</h3>
+                <h3 style={{ fontFamily: displayFont, fontSize: 20, fontWeight: 500, letterSpacing: '-0.01em', margin: 0 }}>{activeList.name}{activeList.forName && <span style={{ fontFamily: 'inherit', fontSize: 12, fontWeight: 600, color: '#64748B', marginLeft: 8 }}>for {activeList.forName}</span>}</h3>
                 <button onClick={() => deleteList(activeList.id)} title="Delete list" style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 4 }}><Trash2 size={14} /></button>
               </div>
 
@@ -2885,8 +2977,14 @@ function ShoppingListsPanel({ lists, onChange, session, displayFont }) {
         </>
       )}
 
-      <div style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 12, padding: '12px 14px', display: 'flex', gap: 6 }}>
-        <input value={newListName} onChange={e => setNewListName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createList()} placeholder="New list name (e.g. Coles weekly)" style={{ flex: 1, padding: '9px 12px', border: '1px solid #E2E8F0', borderRadius: 8, fontSize: 13, fontFamily: 'inherit' }} />
+      <div style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 12, padding: '12px 14px', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <input value={newListName} onChange={e => setNewListName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createList()} placeholder="New list (e.g. Coles weekly, Sam's packing)" style={{ flex: '1 1 180px', minWidth: 0, padding: '9px 12px', border: '1px solid #E2E8F0', borderRadius: 8, fontSize: 13, fontFamily: 'inherit' }} />
+        {people.length > 0 && (
+          <select value={newListFor} onChange={e => setNewListFor(e.target.value)} aria-label="List is for" style={{ padding: '9px 10px', border: '1px solid #E2E8F0', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', background: '#FFFFFF' }}>
+            <option value="">Everyone</option>
+            {people.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+          </select>
+        )}
         <button onClick={createList} style={{ ...btnGhost, padding: '9px 14px', fontSize: 13 }}>+ Create</button>
       </div>
     </div>
@@ -4116,7 +4214,8 @@ function SettingsPanel({ data, setData, onClose, displayFont, session, familyId,
           <input value={data.familyName} onChange={e => setData({ ...data, familyName: e.target.value })} style={inputStyle} />
         </div>
 
-        <h4 style={{ fontFamily: displayFont, fontSize: 18, fontWeight: 500, letterSpacing: '-0.01em', margin: '24px 0 12px' }}>The adults</h4>
+        <h4 style={{ fontFamily: displayFont, fontSize: 18, fontWeight: 500, letterSpacing: '-0.01em', margin: '24px 0 4px' }}>Your household</h4>
+        <p style={{ fontSize: 12, color: '#64748B', margin: '0 0 12px' }}>Everyone who lives here. Each person gets their own tasks, lists and reminders.</p>
         {(data.adults || []).map((a, i) => (
           <AdultEditor key={a.id} adult={a} onChange={(updated) => {
             const next = [...(data.adults || [])];
@@ -4124,11 +4223,6 @@ function SettingsPanel({ data, setData, onClose, displayFont, session, familyId,
             setData({ ...data, adults: next });
           }} onRemove={() => setData({ ...data, adults: (data.adults || []).filter((_, ix) => ix !== i) })} />
         ))}
-        <button onClick={() => setData({ ...data, adults: [...(data.adults || []), { id: 'a' + Date.now(), name: 'New adult', colour: KID_COLOURS[((data.adults || []).length + 2) % KID_COLOURS.length].id }] })} style={{ ...btnGhost, width: '100%', justifyContent: 'center' }}>
-          <Plus size={14} /> Add adult
-        </button>
-
-        <h4 style={{ fontFamily: displayFont, fontSize: 18, fontWeight: 500, letterSpacing: '-0.01em', margin: '24px 0 12px' }}>The kids</h4>
         {data.kids.map((k, i) => (
           <KidEditor key={k.id} kid={k} onChange={(updated) => {
             const nextKids = [...data.kids];
@@ -4138,9 +4232,14 @@ function SettingsPanel({ data, setData, onClose, displayFont, session, familyId,
             setData({ ...data, kids: data.kids.filter((_, ix) => ix !== i) });
           }} />
         ))}
-        <button onClick={() => setData({ ...data, kids: [...data.kids, { id: 'k' + Date.now(), name: 'New child', age: 0, school: '', allergies: '', picky: '', interests: '', colour: KID_COLOURS[data.kids.length % KID_COLOURS.length].id }] })} style={{ ...btnGhost, width: '100%', justifyContent: 'center' }}>
-          <Plus size={14} /> Add child
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => setData({ ...data, adults: [...(data.adults || []), { id: 'a' + Date.now(), name: 'New adult', colour: KID_COLOURS[((data.adults || []).length + 2) % KID_COLOURS.length].id }] })} style={{ ...btnGhost, flex: '1 1 140px', justifyContent: 'center' }}>
+            <Plus size={14} /> Add adult
+          </button>
+          <button onClick={() => setData({ ...data, kids: [...data.kids, { id: 'k' + Date.now(), name: 'New child', age: 0, school: '', allergies: '', picky: '', interests: '', colour: KID_COLOURS[data.kids.length % KID_COLOURS.length].id }] })} style={{ ...btnGhost, flex: '1 1 140px', justifyContent: 'center' }}>
+            <Plus size={14} /> Add child
+          </button>
+        </div>
 
         {supabase && session && familyId && (
           <AssistantConnectPanel data={data} session={session} familyId={familyId} displayFont={displayFont} />
@@ -4161,8 +4260,8 @@ function SettingsPanel({ data, setData, onClose, displayFont, session, familyId,
 
         {familyId && (
           <div style={{ marginTop: 32, paddingTop: 20, borderTop: '1px solid #E2E8F0' }}>
-            <h4 style={{ fontFamily: displayFont, fontSize: 18, fontWeight: 500, letterSpacing: '-0.01em', margin: '0 0 4px' }}>Family members</h4>
-            <p style={{ fontSize: 12, color: '#64748B', margin: '0 0 14px' }}>Everyone here can see and edit shared calendar, tasks, meals, and inbox. Changes sync live across all devices.</p>
+            <h4 style={{ fontFamily: displayFont, fontSize: 18, fontWeight: 500, letterSpacing: '-0.01em', margin: '0 0 4px' }}>App access</h4>
+            <p style={{ fontSize: 12, color: '#64748B', margin: '0 0 14px' }}>People who can sign in to this family's Nestly. Everyone here can see and edit the shared calendar, tasks, lists, meals, and inbox. Changes sync live across all devices.</p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
               {familyMembers.map(m => (
